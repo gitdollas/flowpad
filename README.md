@@ -2,6 +2,8 @@
 
 A beat sketchpad for your phone or computer. Record a loop on 16 pads, hit **Next idea**, and keep going. Every idea is saved so you can chain them later.
 
+**Open it:** https://gitdollas.github.io/flowpad/
+
 ## Files
 
 - `flowpad.html`: the app. This is the only file you edit.
