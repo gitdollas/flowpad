@@ -266,6 +266,12 @@ const LENS = [{n: 'Full', b: 0}, {n: '1/16', b: 0.25}, {n: '1/8', b: 0.5}, {n: '
 const VOICES = ['poly', 'mono'];
 const CATS = ['Kick', 'Snare', 'Clap', 'Hat', 'Open hat', '808', 'Perc', 'Cymbal', 'Bass', 'Synth', 'Vocal', 'FX', 'Other'];
 const BUILTIN_CAT = ['Kick', 'Kick', 'Snare', 'Clap', 'Hat', 'Open hat', 'Perc', 'Perc', 'Perc', 'Perc', 'Perc', 'Perc', 'Bass', 'Bass', 'Synth', 'Cymbal'];
+/* sound type: trust the folder it lives in (Kicks, Snares, 808s…), nearest folder first, then the file name */
+function catFor(dir, file) {
+  const ds = (dir || '').split('/').reverse();
+  for (const d of ds) { const c = detectCat(d); if (c !== 'Other') return c; }
+  return detectCat(file);
+}
 function detectCat(s) {
   s = (s || '').toLowerCase().replace(/[_\-.\/]+/g, ' ');
   const rules = [[/open.?h|\boh\b/, 'Open hat'], [/kick|kik|\bbd\b|bassdrum/, 'Kick'], [/snare|snr|\bsd\b|rimshot/, 'Snare'], [/clap|clp/, 'Clap'],
@@ -327,6 +333,7 @@ try {
 P.ideas.forEach(migrate);
 if (!Array.isArray(P.pads) || P.pads.length !== 16) P.pads = freshProject().pads;
 if (!Array.isArray(P.lib)) P.lib = [];
+P.lib.forEach(it => { if (it.dir && it.dir !== 'Added') it.cat = catFor(it.dir, it.file || it.name); });
 if (!Array.isArray(P.song)) P.song = [];
 /* song timeline: lanes (one per instrument) holding clips (one part of one idea, looped for the clip's length) */
 if (!P.arr || !Array.isArray(P.arr.lanes)) {
@@ -1229,6 +1236,7 @@ function sheetSounds(body) {
   body.append(h('p', 'note', 'Give Flowpad the one folder where you keep your sounds. It sorts them by type (kicks, snares, hats, 808s…) and keeps your folders too. Tap a pad\u2019s name to hear it. Tap Browse to pick a different sound; each one plays as you tap it. Your library: ' + n + ' sound' + (n === 1 ? '' : 's') + ', kept on this device.'));
   const add = h('div', 'opts');
   add.append(btn('Add a folder', () => pickLib(true)), btn('Add sounds', () => pickLib(false)), btn('Load a kit (16)', () => { if (ready) { $('#fileMany').value = ''; $('#fileMany').click(); } else init(); }));
+  if (n) add.append(confirmBtn('fillpads', 'Fill all 16 pads from my library', () => fillPads()));
   body.append(add);
   for (let i = 0; i < 16; i++) {
     const p = P.pads[i], row = h('div', 'irow');
@@ -1265,6 +1273,28 @@ async function libBuf(id) {
   try { if (rec && rec.data) { const b = trimLead(await ctx.decodeAudioData(rec.data.slice(0))); libCache.set(id, b); return b; } } catch (e) {}
   return null;
 }
+/* one sound per pad, by type, picked at random from the library: tap again for a different mix */
+const FILL_SLOTS = [['Kick'], ['Kick', '808'], ['Snare'], ['Clap', 'Snare'], ['Hat'], ['Open hat', 'Hat'], ['Perc'], ['Perc'], ['Perc'], ['Perc'], ['Perc', 'Vocal'], ['Perc', 'FX'], ['808', 'Bass'], ['808', 'Bass'], ['Vocal', 'FX', 'Perc'], ['Cymbal', 'Open hat']];
+async function fillPads() {
+  if (!P.lib.length) { msg('Add your sounds first with Add a folder'); return; }
+  if (!ready) { await init(); if (!ready) return; }
+  msg('Filling pads…');
+  const used = new Set(); let n = 0;
+  for (let i = 0; i < 16; i++) {
+    for (const cat of FILL_SLOTS[i]) {
+      const pool = P.lib.filter(it => it.cat === cat && !used.has(it.id));
+      if (!pool.length) continue;
+      const it = pool[Math.floor(Math.random() * pool.length)];
+      used.add(it.id);
+      const pd = P.pads[i]; pd.tune = 0; delete pd.fx; pd.cut = cat === '808' || cat === 'Bass';
+      if (await assignItem(i, it, true)) n++;
+      break;
+    }
+  }
+  msg(n ? 'Filled ' + n + ' pads from your library. Tap again for a different mix' : 'No kicks, snares, hats or 808s found in your library');
+  if (n) audPad(0);
+  render();
+}
 async function assignItem(i, it, quiet) {
   if (!ready) { await init(); if (!ready) return false; }
   const pd = P.pads[i];
@@ -1296,7 +1326,7 @@ async function addLibFiles(list) {
     if (P.lib.some(x => x.dir === dir && x.file === f.name && x.size === f.size)) continue;
     const id = uid();
     await DB.put('lib' + id, {data: await f.arrayBuffer()});
-    const it = {id, name: cleanName(f.name), file: f.name, size: f.size, dir, cat: detectCat(path + ' ' + f.name), group: parts.length > 1 ? parts[parts.length - 2] : 'Added'};
+    const it = {id, name: cleanName(f.name), file: f.name, size: f.size, dir, cat: parts.length > 1 ? catFor(dir, f.name) : detectCat(f.name), group: parts.length > 1 ? parts[parts.length - 2] : 'Added'};
     P.lib.push(it); added.push(it);
   }
   save();
